@@ -52,7 +52,7 @@ Los campos se definen en `LoginResponse` y `AuthService` (`auth/src/main/java/co
 
 ```json
 {
-  "token": "c3R1ZGVudHxTVFVERU5UfDE3OTMwNTQ1NTV8V09SS1NIT1BfU0VDUkVUXzIwMjY=",
+  "token": "<jwt-hs256-firmado>",
   "expiresIn": 3600,
   "user": {
     "username": "student",
@@ -102,8 +102,8 @@ Quarkus tambien devolvio **400 Bad Request** con body vacio para JSON malformado
 
 #### 6. Notas de seguridad
 
-- El token actual es Base64 de username, rol, expiracion y un secreto constante; Base64 no firma ni protege la integridad. No tratarlo como JWT ni confiar en claims decodificados (`auth/src/main/java/com/bcp/workshop/auth/LegacyTokenUtil.java:8-15`).
-- Auth genera una expiracion de 3600 segundos, pero este componente no valida tokens entrantes. `expiresIn` no demuestra por si solo que un consumidor aplique expiracion (`auth/src/main/java/com/bcp/workshop/auth/LegacyTokenUtil.java:9,14-15`).
+- El token es un JWT HS256 firmado con la clave de `AUTH_TOKEN_KEY` (`auth/src/main/java/com/bcp/workshop/auth/JwtTokenService.java`). Contiene `sub`, `role`, `iat` y `exp`; la firma permite detectar alteraciones. La clave es obligatoria: sin `AUTH_TOKEN_KEY` el login falla. Nunca documentar ni versionar su valor.
+- La expiracion es de 3600 segundos (`exp - iat`) y `expiresIn` refleja ese valor. Los consumidores deben validar la firma y `exp` antes de confiar en los claims.
 - Las contrasenas se verifican con PBKDF2 y se parametriza la consulta SQL; la migracion de contrasenas antiguas conserva un riesgo documentado en H-AUTH-09 (`auth/src/main/java/com/bcp/workshop/auth/LegacyDatabase.java:63-80`; `auth/src/main/java/com/bcp/workshop/auth/PasswordHasher.java:12-58`).
 - El 500 expone mensaje y clase de excepcion (H-AUTH-05 pendiente). No mostrar esa informacion a usuarios finales.
 - CORS esta habilitado; el origen predeterminado es `http://localhost:4200` y otros origenes deben declararse con `AUTH_CORS_ORIGINS`. Un preflight desde un origen no permitido se rechaza (`auth/src/main/resources/application.properties:4-7`).
@@ -171,6 +171,6 @@ Ejemplo JSON completo capturado en `http://127.0.0.1:8080/q/health`:
 - **Contrato observado:** los codigos, campos y ejemplos anteriores proceden del codigo/pruebas de auth y de una consulta local al endpoint SmallRye Health.
 - **Contrato acordado:** no hay en estos documentos una decision que cambie el formato HTTP, los valores de error o el formato del token. Integradores deben tratar los campos observados como contrato vigente sin asumir que el token sea verificable.
 - **Pendiente:** confirmar si `debug` y `exception` deben conservarse; ambos siguen presentes en la respuesta actual.
-- **Pendiente:** coordinar la sustitucion del token antes de exigir firma o claims a consumidores.
+- **Cambio aplicado (H-AUTH-03):** el token pasa de Base64 a JWT HS256 firmado (corte directo, sin formato dual). Consumidores que decodificaban el Base64 anterior deben migrar a validar el JWT.
 - **Pendiente:** registrar los origenes CORS autorizados para cada despliegue no local.
 - **Pendiente:** definir/ejecutar un health check DOWN para fijar status y cuerpo de fallo; el ejemplo de error no se inventa.

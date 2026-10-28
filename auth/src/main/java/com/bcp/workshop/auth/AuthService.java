@@ -9,10 +9,12 @@ import java.util.Optional;
 @ApplicationScoped
 public class AuthService {
     private final LegacyDatabase database;
+    private final JwtTokenService tokenService;
 
     @Inject
-    public AuthService(LegacyDatabase database) {
+    public AuthService(LegacyDatabase database, JwtTokenService tokenService) {
         this.database = database;
+        this.tokenService = tokenService;
     }
 
     public Optional<LoginResponse> authenticate(String username, String password) {
@@ -27,8 +29,8 @@ public class AuthService {
                 user.role()
         );
         return Optional.of(new LoginResponse(
-                LegacyTokenUtil.create(user.username(), user.role()),
-                LegacyTokenUtil.EXPIRATION_SECONDS,
+                tokenService.issue(user.username(), user.role()),
+                JwtTokenService.EXPIRATION_SECONDS,
                 responseUser,
                 "authenticated-with-legacy-flow"
         ));
