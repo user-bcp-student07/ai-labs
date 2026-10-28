@@ -213,7 +213,7 @@ class AuthResourceTest {
             public UserRecord findByCredentials(String username, String password) {
                 throw new IllegalStateException("controlled failure");
             }
-        });
+        }, new JwtTokenService("test-only-signing-key-0123456789abcdef"));
         LoginRequest request = new LoginRequest();
         request.username = "test-user";
         request.password = "test-password";
