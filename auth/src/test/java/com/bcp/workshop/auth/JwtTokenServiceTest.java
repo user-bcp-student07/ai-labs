@@ -3,6 +3,7 @@ package com.bcp.workshop.auth;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
+import io.jsonwebtoken.security.WeakKeyException;
 import org.junit.jupiter.api.Test;
 
 import javax.crypto.SecretKey;
@@ -67,6 +68,27 @@ class JwtTokenServiceTest {
     void failsWhenSigningKeyIsBlank() {
         assertThrows(IllegalStateException.class,
                 () -> new JwtTokenService("").issue("student", "STUDENT"));
+    }
+
+    @Test
+    void rejectsIssuingWithSigningKeyShorterThan256Bits() {
+        assertThrows(WeakKeyException.class,
+                () -> new JwtTokenService("short-key").issue("student", "STUDENT"));
+    }
+
+    @Test
+    void failsValidationWhenSigningKeyIsBlank() {
+        JwtTokenService service = new JwtTokenService("");
+
+        assertThrows(IllegalStateException.class, () -> service.isValid("not-a-jwt"));
+    }
+
+    @Test
+    void rejectsNullOrEmptyToken() {
+        JwtTokenService service = new JwtTokenService(TEST_KEY);
+
+        assertFalse(service.isValid(null));
+        assertFalse(service.isValid(""));
     }
 
     private static Claims parse(String token, String key) {

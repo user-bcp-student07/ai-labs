@@ -91,13 +91,10 @@ Quarkus tambien devolvio **400 Bad Request** con body vacio para JSON malformado
 
 **405 Method Not Allowed**, si se usa `GET` en la ruta de login, que solo declara `POST`. Quarkus respondio con body vacio en la verificacion local (`auth/src/main/java/com/bcp/workshop/auth/AuthResource.java:21-23`).
 
-**500 Internal Server Error**, si una excepcion escapa de `AuthService`. El mensaje y nombre de clase se devuelven literalmente; este comportamiento se verifico con una excepcion controlada (`auth/src/main/java/com/bcp/workshop/auth/AuthResource.java:40-45`; `auth/src/test/java/com/bcp/workshop/auth/AuthResourceTest.java:145-165`):
+**500 Internal Server Error**, si una excepcion escapa de `AuthService`. La respuesta no incluye el mensaje ni la clase de la excepcion; el detalle se registra en el log del servidor (`auth/src/main/java/com/bcp/workshop/auth/AuthResource.java:40-47`; `auth/src/test/java/com/bcp/workshop/auth/AuthResourceTest.java:229-247`):
 
 ```json
-{
-  "message": "controlled failure",
-  "exception": "java.lang.IllegalStateException"
-}
+{"message":"Internal authentication error"}
 ```
 
 #### 6. Notas de seguridad
@@ -105,7 +102,7 @@ Quarkus tambien devolvio **400 Bad Request** con body vacio para JSON malformado
 - El token es un JWT HS256 firmado con la clave de `AUTH_TOKEN_KEY` (`auth/src/main/java/com/bcp/workshop/auth/JwtTokenService.java`). Contiene `sub`, `role`, `iat` y `exp`; la firma permite detectar alteraciones. La clave es obligatoria: sin `AUTH_TOKEN_KEY` el login falla. Nunca documentar ni versionar su valor.
 - La expiracion es de 3600 segundos (`exp - iat`) y `expiresIn` refleja ese valor. Los consumidores deben validar la firma y `exp` antes de confiar en los claims.
 - Las contrasenas se verifican con PBKDF2 y se parametriza la consulta SQL; la migracion de contrasenas antiguas conserva un riesgo documentado en H-AUTH-09 (`auth/src/main/java/com/bcp/workshop/auth/LegacyDatabase.java:63-80`; `auth/src/main/java/com/bcp/workshop/auth/PasswordHasher.java:12-58`).
-- El 500 expone mensaje y clase de excepcion (H-AUTH-05 pendiente). No mostrar esa informacion a usuarios finales.
+- El 500 no expone mensaje ni clase de excepcion (H-AUTH-05; el detalle queda en el log del servidor). La clave ausente produce este mismo 500 genérico.
 - CORS esta habilitado; el origen predeterminado es `http://localhost:4200` y otros origenes deben declararse con `AUTH_CORS_ORIGINS`. Un preflight desde un origen no permitido se rechaza (`auth/src/main/resources/application.properties:4-7`).
 - El endpoint no requiere `Authorization`; esto no implica que el token emitido sea seguro para otros componentes. La compatibilidad y validacion del token siguen pendientes.
 
@@ -170,7 +167,7 @@ Ejemplo JSON completo capturado en `http://127.0.0.1:8080/q/health`:
 
 - **Contrato observado:** los codigos, campos y ejemplos anteriores proceden del codigo/pruebas de auth y de una consulta local al endpoint SmallRye Health.
 - **Contrato acordado:** no hay en estos documentos una decision que cambie el formato HTTP, los valores de error o el formato del token. Integradores deben tratar los campos observados como contrato vigente sin asumir que el token sea verificable.
-- **Pendiente:** confirmar si `debug` y `exception` deben conservarse; ambos siguen presentes en la respuesta actual.
+- **Pendiente:** confirmar si `debug` debe conservarse; sigue presente en la respuesta 200. El campo `exception` del 500 ya fue retirado (D2).
 - **Cambio aplicado (H-AUTH-03):** el token pasa de Base64 a JWT HS256 firmado (corte directo, sin formato dual). Consumidores que decodificaban el Base64 anterior deben migrar a validar el JWT.
 - **Pendiente:** registrar los origenes CORS autorizados para cada despliegue no local.
 - **Pendiente:** definir/ejecutar un health check DOWN para fijar status y cuerpo de fallo; el ejemplo de error no se inventa.

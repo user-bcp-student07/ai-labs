@@ -52,3 +52,25 @@
 - No se ejecutaron pruebas, SAST ni analisis SCA; no se afirma CVE confirmado ni porcentaje de cobertura.
 - H-AUTH-01 a H-AUTH-08 conservan sus IDs previos; los hallazgos nuevos usan H-AUTH-09 a H-AUTH-12.
 - No se editaron archivos de codigo, configuracion ni pruebas en auth.
+
+## Evidencia de implementacion: auth-token-firmado-login (Issue #24, HU-01)
+
+Comandos ejecutados desde la raiz de ai-labs:
+
+| Comando | Resultado |
+| --- | --- |
+| `python tools/lab.py test auth` (con `AUTH_DB_URL=jdbc:sqlite:target/h-auth-02-characterization.db`) | 36 pruebas, 0 fallos, 0 errores, BUILD SUCCESS, exit 0 |
+| `openspec validate auth-token-firmado-login --strict` | Change valid, exit 0 |
+
+Cobertura JaCoCo de las clases tocadas (`auth/target/site/jacoco/jacoco.xml`): `AuthResource` 18/18 lineas (100%), `AuthService` 13/13 (100%), `JwtTokenService` 19/19 (100%). Meta de 85% cumplida.
+
+| ID | Estado | Evidencia y pruebas que lo cubren |
+| --- | --- | --- |
+| H-AUTH-03 | Resuelto (se mantiene) | El token es JWT HS256 firmado con `AUTH_TOKEN_KEY` (`JwtTokenService.java`). `JwtTokenServiceTest`: emision valida, payload alterado, otra clave, token malformado. `AuthResourceTest.verifiesSignatureOfTokenIssuedByLogin`: el token del login se acepta y un payload alterado se rechaza. Verificacion limitada a `auth/` (D5). |
+| H-AUTH-07 | Pendiente (parcial) | Contrato 200 preservado: `AuthResourceTest.keepsLoginResponseFieldTypes`. El campo `exception` del 500 se retiro por D2; el campo `debug` sigue pendiente de decision humana. |
+| H-AUTH-05 | Pendiente de confirmacion humana | Decision D2 aplicada: el 500 responde `{"message":"Internal authentication error"}` sin `exception`; el detalle se registra en el log. Pruebas: `AuthResourceTest.returnsGenericErrorWithoutExceptionDetailsForControlledFailure` y `returnsGenericErrorWhenSigningKeyIsMissing`. |
+
+Decisiones registradas: D2 aprobada (ocultar detalle de excepcion); D3 sin longitud minima de `AUTH_TOKEN_KEY` (no implementado, tareas 3.1 y 5.3 omitidas); la parte de D3 sobre `isValid` con clave en blanco no fue aprobada (tarea 3.2 pendiente); D5 aprobada (verificacion solo en `auth/`); H-AUTH-03 se mantiene `Resuelto`.
+
+No se incluyeron tokens, valores de `AUTH_TOKEN_KEY` ni la clave literal de `%test`. No hay exclusiones de JaCoCo, `@SuppressWarnings` ni cambios en CodeQL o Dependency Review.
+
