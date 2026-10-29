@@ -2,20 +2,33 @@ package com.bcp.workshop.auth;
 
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.security.Keys;
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.response.ValidatableResponse;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.junit.jupiter.api.Test;
 
+import javax.crypto.SecretKey;
+import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
+import java.util.Base64;
 import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.CoreMatchers.is;
+import static org.hamcrest.Matchers.emptyString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.instanceOf;
+import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.nullValue;
 
@@ -23,6 +36,12 @@ import static org.hamcrest.Matchers.nullValue;
 class AuthResourceTest {
     @Inject
     LegacyDatabase database;
+
+    @Inject
+    JwtTokenService tokenService;
+
+    @ConfigProperty(name = "auth.token.key")
+    String signingKey;
 
     @Test
     void logsInWithWorkshopUser() {
@@ -206,7 +225,7 @@ class AuthResourceTest {
     }
 
     @Test
-    void returnsCurrentErrorDetailsForControlledFailure() {
+    void returnsGenericErrorWithoutExceptionDetailsForControlledFailure() {
         AuthResource resource = new AuthResource();
         resource.authService = new AuthService(new LegacyDatabase() {
             @Override
@@ -221,10 +240,7 @@ class AuthResourceTest {
         Response response = resource.login(request);
 
         assertEquals(Response.Status.INTERNAL_SERVER_ERROR.getStatusCode(), response.getStatus());
-        assertEquals(Map.of(
-                "message", "controlled failure",
-                "exception", IllegalStateException.class.getName()
-        ), response.getEntity());
+        assertEquals(Map.of("message", "Internal authentication error"), response.getEntity());
     }
 
     @Test
@@ -257,6 +273,80 @@ class AuthResourceTest {
                 .then()
                 .statusCode(403)
                 .header("Access-Control-Allow-Origin", nullValue());
+    }
+
+    @Test
+    void keepsLoginResponseFieldTypes() {
+        given()
+                .contentType("application/json")
+                .body("{\"username\":\"student\",\"password\":\"Workshop123!\"}")
+                .when().post("/auth/login")
+                .then()
+                .statusCode(200)
+                .body("token", instanceOf(String.class))
+                .body("token", not(emptyString()))
+                .body("expiresIn", instanceOf(Integer.class))
+                .body("user", instanceOf(Map.class))
+                .body("debug", instanceOf(String.class));
+    }
+
+    @Test
+    void verifiesSignatureOfTokenIssuedByLogin() {
+        String token = loginAsStudent().extract().path("token");
+
+        assertTrue(tokenService.isValid(token));
+        assertFalse(tokenService.isValid(withForgedPayload(token)));
+    }
+
+    @Test
+    void issuesLoginTokenExpiringOneHourAfterIssue() {
+        ValidatableResponse response = loginAsStudent();
+        String token = response.extract().path("token");
+
+        Claims claims = parseClaims(token);
+
+        assertEquals(3600L, (claims.getExpiration().getTime() - claims.getIssuedAt().getTime()) / 1000);
+        response.body("expiresIn", is(3600));
+    }
+
+    @Test
+    void returnsGenericErrorWhenSigningKeyIsMissing() {
+        AuthResource resource = new AuthResource();
+        resource.authService = new AuthService(new LegacyDatabase() {
+            @Override
+            public UserRecord findByCredentials(String username, String password) {
+                return new UserRecord(1L, username, "Test User", "STUDENT");
+            }
+        }, new JwtTokenService(""));
+        LoginRequest request = new LoginRequest();
+        request.username = "test-user";
+        request.password = "test-password";
+
+        Response response = resource.login(request);
+
+        assertEquals(Response.Status.INTERNAL_SERVER_ERROR.getStatusCode(), response.getStatus());
+        assertEquals(Map.of("message", "Internal authentication error"), response.getEntity());
+    }
+
+    private ValidatableResponse loginAsStudent() {
+        return given()
+                .contentType("application/json")
+                .body("{\"username\":\"student\",\"password\":\"Workshop123!\"}")
+                .when().post("/auth/login")
+                .then()
+                .statusCode(200);
+    }
+
+    private String withForgedPayload(String token) {
+        String[] parts = token.split("\\.");
+        String forgedPayload = Base64.getUrlEncoder().withoutPadding()
+                .encodeToString("{\"sub\":\"admin\",\"role\":\"ADMIN\"}".getBytes(StandardCharsets.UTF_8));
+        return parts[0] + "." + forgedPayload + "." + parts[2];
+    }
+
+    private Claims parseClaims(String token) {
+        SecretKey secretKey = Keys.hmacShaKeyFor(signingKey.getBytes(StandardCharsets.UTF_8));
+        return Jwts.parser().verifyWith(secretKey).build().parseSignedClaims(token).getPayload();
     }
 
     private void insertCharacterizationUser(String databaseUrl, String username) throws Exception {
