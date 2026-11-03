@@ -2,8 +2,10 @@ import base64
 import hashlib
 import hmac
 import json
+import sqlite3
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -69,6 +71,48 @@ def test_lists_seeded_tasks_and_ignores_requested_owner(tmp_path: Path) -> None:
     assert response.status_code == 200
     assert len(response.json()) == 2
     assert {task["owner"] for task in response.json()} == {"student"}
+    assert set(response.json()[0]) == {
+        "id",
+        "title",
+        "description",
+        "status",
+        "owner",
+        "priority",
+        "createdAt",
+    }
+
+
+def test_creates_task_with_default_status_and_priority(tmp_path: Path) -> None:
+    app = create_app(str(tmp_path / "workshop.db"), str(tmp_path / "uploads"))
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/tasks",
+            headers=headers(),
+            json={"title": "New task", "description": "Task details"},
+        )
+    assert response.status_code == 201
+    assert response.json() == {
+        "id": 4,
+        "title": "New task",
+        "description": "Task details",
+        "status": "TODO",
+        "owner": "student",
+        "priority": "MEDIUM",
+        "createdAt": response.json()["createdAt"],
+    }
+
+
+def test_summarizes_seeded_tasks_with_observed_response_shape(tmp_path: Path) -> None:
+    app = create_app(str(tmp_path / "workshop.db"), str(tmp_path / "uploads"))
+    with TestClient(app) as client:
+        response = client.get("/api/summary", headers=headers())
+    assert response.status_code == 200
+    assert response.json() == {
+        "owner": "student",
+        "total": 2,
+        "byStatus": {"TODO": 1, "IN_PROGRESS": 1},
+        "highPriorityOpen": 1,
+    }
 
 
 def test_creates_task_and_summary_for_authenticated_owner(tmp_path: Path) -> None:
@@ -104,6 +148,44 @@ def test_uploads_requirement(tmp_path: Path) -> None:
         )
     assert response.status_code == 201
     assert (upload_dir / "requirements.txt").exists()
+    assert response.json() == {
+        "owner": "student",
+        "fileName": "requirements.txt",
+        "storedAt": str(upload_dir / "requirements.txt"),
+        "size": len(b"Login must be accessible"),
+    }
+
+
+def test_returns_backend_health_response_from_dependency(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.routes.urllib3.PoolManager",
+        lambda: SimpleNamespace(
+            request=lambda method, url, timeout: SimpleNamespace(
+                status=200,
+                data=b'{"status":"UP"}',
+            )
+        ),
+    )
+    app = create_app(str(tmp_path / "workshop.db"), str(tmp_path / "uploads"))
+    with TestClient(app) as client:
+        response = client.get("/api/backend-health", headers=headers())
+    assert response.status_code == 200
+    assert response.json() == {
+        "requestedBy": "student",
+        "status": 200,
+        "body": '{"status":"UP"}',
+    }
+
+
+def test_closes_database_connection_on_application_shutdown(tmp_path: Path) -> None:
+    app = create_app(str(tmp_path / "workshop.db"), str(tmp_path / "uploads"))
+    with TestClient(app):
+        pass
+    with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+        app.state.connection.execute("SELECT 1")
 
 
 def test_rejects_upload_path_traversal(tmp_path: Path) -> None:
